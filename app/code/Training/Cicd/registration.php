@@ -5,3 +5,4 @@ ComponentRegistrar::register(
     'Training_Cicd',
     __DIR__
 );
+echo "Testing CI"
