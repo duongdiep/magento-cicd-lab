@@ -1,0 +1,73 @@
+name: Deploy Magento Staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Verify Magento Staging
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          SSH_HOST_KEY: ${{ secrets.STAGING_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Verify Magento staging
+        shell: bash
+        env:
+          HOST: ${{ secrets.STAGING_HOST }}
+          USER: ${{ secrets.STAGING_USER }}
+          PORT: ${{ secrets.STAGING_PORT }}
+          STAGING_PATH: ${{ secrets.STAGING_PATH }}
+        run: |
+          test -n "$STAGING_PATH"
+
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            -p "$PORT" \
+            "$USER@$HOST" \
+            bash -s -- "$STAGING_PATH" <<'REMOTE'
+          set -e
+
+          STAGING_PATH="$1"
+
+          echo "Checking Magento installation..."
+
+          test -d "$STAGING_PATH"
+          test -f "$STAGING_PATH/bin/magento"
+          test -f "$STAGING_PATH/app/etc/env.php"
+          test -d "$STAGING_PATH/app/code"
+
+          echo "Magento installation detected."
+          echo "Checking module directory..."
+
+          if [ -d "$STAGING_PATH/app/code/Training/Cicd" ]; then
+            echo "Training_Cicd already exists."
+          else
+            echo "Training_Cicd is not installed yet."
+          fi
+
+          echo "Preflight completed successfully."
+          REMOTE
