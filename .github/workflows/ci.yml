@@ -59,6 +59,8 @@ jobs:
         run: |
           mkdir -p build/reports
 
+          set +e
+
           vendor/bin/phpcs \
             --standard=PSR12 \
             --report=full \
@@ -70,9 +72,20 @@ jobs:
             --standard=PSR12 \
             --report=checkstyle \
             --report-file=build/reports/phpcs.xml \
-            app/code/Training/Cicd/Model || true
+            app/code/Training/Cicd/Model
 
-          exit "$status"
+          report_status=$?
+
+          set -e
+
+          if [ ! -f build/reports/phpcs.xml ]; then
+            echo "::error::PHPCS XML report was not generated"
+            exit 1
+          fi
+
+          if [ "$status" -ne 0 ] || [ "$report_status" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Annotate PR with PHPCS errors
         if: github.event_name == 'pull_request' && steps.phpcs_test.outcome == 'failure'
@@ -87,9 +100,9 @@ jobs:
             -fail-on-error=false \
             < build/reports/phpcs.xml
 
-        - name: Fail if PHPCS found errors
-          if: steps.phpcs_test.outcome == 'failure'
-          run: exit 1
+      - name: Fail if PHPCS found errors
+        if: steps.phpcs_test.outcome == 'failure'
+        run: exit 1
 
   phpunit:
     name: PHPUnit
