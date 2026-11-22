@@ -62,3 +62,9 @@
 
     # Push lên branch test
     git push origin test/ci-failure
+14. 
+    cd ~/Desktop/magento-cicd-lab
+    git status
+    git switch main
+    git pull --ff-only origin main
+    git switch -c feature/phpunit-ci
