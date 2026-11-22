@@ -1,7 +1,7 @@
 name: Magento CI
 
 on:
-  push:
+  #push:
   pull_request:
 
 permissions:
