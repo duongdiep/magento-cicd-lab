@@ -1,0 +1,12 @@
+# Personal notes
+guilde.md
+
+# Local environment
+.env
+.env.local
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
