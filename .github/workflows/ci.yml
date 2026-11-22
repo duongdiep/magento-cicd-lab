@@ -4,8 +4,38 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  php-tests:
+  php-lint:
+    name: PHP Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Check PHP syntax
+        run: |
+          set +e
+          failed=0
+
+          while IFS= read -r -d '' file; do
+            php -l "$file" || failed=1
+          done < <(find app/code tests -type f -name '*.php' -print0)
+
+          exit "$failed"
+        shell: bash
+
+  phpcs:
+    name: PHP CodeSniffer
     runs-on: ubuntu-latest
 
     steps:
@@ -19,11 +49,6 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Validate PHP syntax
-        run: |
-          find app/code tests -type f -name "*.php" \
-            -print0 | xargs -0 -r -n1 php -l
-
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction
 
@@ -31,7 +56,30 @@ jobs:
         run: |
           vendor/bin/phpcs \
             --standard=PSR12 \
+            --report=full \
             app/code/Training/Cicd/Model
 
+  phpunit:
+    name: PHPUnit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
       - name: Run PHPUnit
-        run: vendor/bin/phpunit --bootstrap vendor/autoload.php tests
+        run: |
+          vendor/bin/phpunit \
+            --bootstrap vendor/autoload.php \
+            --testdox \
+            tests

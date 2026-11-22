@@ -1,0 +1,37 @@
+name: Magento CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  php-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate PHP syntax
+        run: |
+          find app/code tests -type f -name "*.php" \
+            -print0 | xargs -0 -r -n1 php -l
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      - name: Check coding standards
+        run: |
+          vendor/bin/phpcs \
+            --standard=PSR12 \
+            app/code/Training/Cicd/Model
+
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit --bootstrap vendor/autoload.php tests
