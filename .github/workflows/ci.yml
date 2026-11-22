@@ -87,9 +87,9 @@ jobs:
             -fail-on-error=false \
             < build/reports/phpcs.xml
 
-      - name: Fail if PHPCS found errors
-        if: steps.phpcs_test.outcome == 'failure'
-        run: exit 1
+        - name: Fail if PHPCS found errors
+          if: steps.phpcs_test.outcome == 'failure'
+          run: exit 1
 
   phpunit:
     name: PHPUnit
