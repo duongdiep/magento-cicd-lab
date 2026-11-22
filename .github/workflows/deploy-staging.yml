@@ -70,10 +70,15 @@ jobs:
           REMOTE
 
           # Upload package
-          scp $SSH_OPTS -P "$PORT" \
-            "$RUNNER_TEMP/training.tar.gz" \
-            "$USER@$HOST:$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz"
-
+          #scp $SSH_OPTS -P "$PORT" \
+          #  "$RUNNER_TEMP/training.tar.gz" \
+          #  "$USER@$HOST:$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz"
+          
+          # Upload package through SSH
+          ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
+          bash -c '"cat > "$1"' _ "$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz" \
+          < "$RUNNER_TEMP/training.tar.gz"
+            
           # Deploy on Cloudways
           ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
             bash -s -- "$ROOT" "$RUN_ID" <<'REMOTE'
