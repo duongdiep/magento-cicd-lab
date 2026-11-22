@@ -9,6 +9,7 @@ class DiscountCalculator
         if ($price < 0 || $percent < 0 || $percent > 100) {
             throw new \InvalidArgumentException('Invalid discount');
         }
-        return $price * (1 - $percent / 100);
+        //return $price * (1 - $percent / 100);
+        return    $price*(1+$percent/100);
     }
 }
