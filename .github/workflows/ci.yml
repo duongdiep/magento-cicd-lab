@@ -1,0 +1,24 @@
+name: Magento CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Validate PHP syntax
+        run: |
+          find app/code -name "*.php" -type f \
+            -print0 | xargs -0 -r -n1 php -l
