@@ -6,68 +6,150 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: magento-staging-deploy
+  cancel-in-progress: false
+
 jobs:
-  preflight:
-    name: Verify Magento Staging
+  deploy:
     runs-on: ubuntu-latest
     environment: staging
 
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure SSH
+      - name: Setup SSH
         shell: bash
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_KEY }}
-          SSH_HOST_KEY: ${{ secrets.STAGING_HOST_KEY }}
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          HOST_KEY: ${{ secrets.STAGING_HOST_KEY }}
         run: |
+          set -euo pipefail
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
 
-          printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-      - name: Verify Magento staging
+      - name: Upload and Deploy
         shell: bash
         env:
           HOST: ${{ secrets.STAGING_HOST }}
           USER: ${{ secrets.STAGING_USER }}
           PORT: ${{ secrets.STAGING_PORT }}
-          STAGING_PATH: ${{ secrets.STAGING_PATH }}
+          ROOT: ${{ secrets.STAGING_PATH }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          test -n "$STAGING_PATH"
+          set -euo pipefail
 
-          ssh \
-            -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o BatchMode=yes \
-            -p "$PORT" \
-            "$USER@$HOST" \
-            bash -s -- "$STAGING_PATH" <<'REMOTE'
-          set -e
+          SSH_OPTS="-i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes"
 
-          STAGING_PATH="$1"
+          # Package all modules under app/code/Training
+          tar -czf "$RUNNER_TEMP/training.tar.gz" \
+            -C app/code Training
 
-          echo "Checking Magento installation..."
+          # Create deployment directory
+          ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
+            bash -s -- "$ROOT" "$RUN_ID" <<'REMOTE'
+          set -euo pipefail
 
-          test -d "$STAGING_PATH"
-          test -f "$STAGING_PATH/bin/magento"
-          test -f "$STAGING_PATH/app/etc/env.php"
-          test -d "$STAGING_PATH/app/code"
+          ROOT="$1"
+          RUN_ID="$2"
 
-          echo "Magento installation detected."
-          echo "Checking module directory..."
+          case "$ROOT" in
+            */applications/maevfyzheh/public_html) ;;
+            *) echo "Invalid staging path"; exit 1 ;;
+          esac
 
-          if [ -d "$STAGING_PATH/app/code/Training/Cicd" ]; then
-            echo "Training_Cicd already exists."
-          else
-            echo "Training_Cicd is not installed yet."
+          cd "$ROOT"
+          mkdir -p "var/cicd/releases/$RUN_ID" var/cicd/backups
+          REMOTE
+
+          # Upload package
+          scp $SSH_OPTS -P "$PORT" \
+            "$RUNNER_TEMP/training.tar.gz" \
+            "$USER@$HOST:$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz"
+
+          # Deploy on Cloudways
+          ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
+            bash -s -- "$ROOT" "$RUN_ID" <<'REMOTE'
+          set -Eeuo pipefail
+
+          ROOT="$1"
+          RUN_ID="$2"
+
+          cd "$ROOT"
+
+          MODULE_DIR="app/code/Training"
+          OLD_DIR="app/code/.training-old-$RUN_ID"
+
+          RELEASE="var/cicd/releases/$RUN_ID"
+          PACKAGE="$RELEASE/training.tar.gz"
+          BACKUP="var/cicd/backups/backup-training-$RUN_ID.tar.gz"
+
+          EXISTED=0
+          DEPLOY_STARTED=0
+
+          # Extract new code before changing live files
+          tar -xzf "$PACKAGE" -C "$RELEASE"
+
+          test -d "$RELEASE/Training"
+          test ! -e "$OLD_DIR"
+
+          # Backup existing Training directory
+          if [ -d "$MODULE_DIR" ]; then
+            tar -czf "$BACKUP" -C app/code Training
+            EXISTED=1
+            echo "Backup created: $BACKUP"
           fi
 
-          echo "Preflight completed successfully."
+          rollback() {
+            echo "DEPLOY FAILED - ROLLBACK"
+
+            if [ "$DEPLOY_STARTED" = "1" ]; then
+              if [ -d "$OLD_DIR" ]; then
+                rm -rf "$MODULE_DIR"
+                mv "$OLD_DIR" "$MODULE_DIR"
+                echo "Old Training directory restored"
+              elif [ "$EXISTED" = "0" ]; then
+                rm -rf "$MODULE_DIR"
+                echo "New Training directory removed"
+              fi
+            fi
+
+            php bin/magento cache:clean || true
+
+            echo "WARNING: Database changes are not rolled back"
+          }
+
+          trap rollback ERR
+
+          # Move old code aside
+          if [ "$EXISTED" = "1" ]; then
+            mv "$MODULE_DIR" "$OLD_DIR"
+          fi
+
+          DEPLOY_STARTED=1
+
+          # Activate new code
+          mv "$RELEASE/Training" "$MODULE_DIR"
+
+          # Run Magento upgrade
+          echo "Running setup:upgrade..."
+          php bin/magento setup:upgrade
+
+          echo "Cleaning Magento cache..."
+          php bin/magento cache:clean
+
+          # Deployment succeeded
+          trap - ERR
+
+          rm -rf "$OLD_DIR"
+          rm -rf "$RELEASE"
+
+          echo "DEPLOY SUCCESS"
           REMOTE
