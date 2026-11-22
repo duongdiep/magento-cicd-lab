@@ -1,8 +1,14 @@
-
 name: Deploy Magento Staging
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Magento CI
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -13,12 +19,24 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.event == 'push'
+        )
+      }}
     runs-on: ubuntu-latest
     environment: staging
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup SSH
         shell: bash
@@ -150,6 +168,10 @@ jobs:
           echo "Running Magento setup:upgrade..."
           php bin/magento setup:upgrade
 
+          echo "Running Magento deploy static content..."
+          php bin/magento s:s:d -f
+          php bin/magento s:s:d -f en_US
+  
           echo "Cleaning Magento cache..."
           php bin/magento cache:clean
 

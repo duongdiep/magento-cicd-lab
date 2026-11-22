@@ -1,7 +1,7 @@
 name: Magento CI
 
 on:
-  #push:
+  push:
   pull_request:
 
 permissions:
@@ -139,3 +139,15 @@ jobs:
           detailed_summary: true
           require_tests: true
           fail_on_parse_error: true
+
+  ci-success:
+    name: CI Passed
+    runs-on: ubuntu-latest
+    needs:
+      - php-lint
+      - phpcs
+      - phpunit
+
+    steps:
+      - name: All checks passed
+        run: echo "PHP Lint, PHPCS and PHPUnit passed!"
