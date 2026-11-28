@@ -2,7 +2,11 @@ name: Magento CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -142,6 +146,7 @@ jobs:
 
   ci-success:
     name: CI Passed
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     needs:
       - php-lint
@@ -149,5 +154,19 @@ jobs:
       - phpunit
 
     steps:
-      - name: All checks passed
-        run: echo "PHP Lint, PHPCS and PHPUnit passed!"
+      - name: Verify required CI job results
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PHP_LINT_RESULT: ${{ needs.php-lint.result }}
+          PHPCS_RESULT: ${{ needs.phpcs.result }}
+          PHPUNIT_RESULT: ${{ needs.phpunit.result }}
+        run: |
+          echo "PHP Lint: $PHP_LINT_RESULT"
+          echo "PHP CodeSniffer: $PHPCS_RESULT"
+          echo "PHPUnit: $PHPUNIT_RESULT"
+
+          if [[ "$PHP_LINT_RESULT" != success || "$PHPCS_RESULT" != success || "$PHPUNIT_RESULT" != success ]]; then
+            echo "::error::All required CI jobs must succeed."
+            exit 1
+          fi
