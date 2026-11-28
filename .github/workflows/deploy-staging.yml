@@ -62,24 +62,45 @@ jobs:
           PORT: ${{ secrets.STAGING_PORT }}
           ROOT: ${{ secrets.STAGING_PATH }}
           RUN_ID: ${{ github.run_id }}
+          STAGING_PHP_BIN: ${{ vars.STAGING_PHP_BIN }}
         run: |
           set -euo pipefail
 
+          if [[ "$STAGING_PHP_BIN" != /* ]]; then
+            echo "STAGING_PHP_BIN must be set to an absolute PHP CLI path." >&2
+            exit 1
+          fi
+
           SSH_OPTS="-i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes"
+
+          # SSH sends a command string parsed by the remote login shell.
+          shell_quote() {
+            local value="$1"
+            printf "'"
+            while [[ "$value" == *"'"* ]]; do
+              printf '%s%s' "${value%%\'*}" "'\''"
+              value="${value#*\'}"
+            done
+            printf "%s'" "$value"
+          }
+
+          REMOTE_ARGS="$(shell_quote "$ROOT") $(shell_quote "$RUN_ID") $(shell_quote "$STAGING_PHP_BIN")"
+          REMOTE_PACKAGE="$(shell_quote "$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz")"
 
           echo "Packaging Training modules..."
 
           tar -czf "$RUNNER_TEMP/training.tar.gz" \
             -C app/code Training
 
-          echo "Creating deployment directory..."
+          echo "Checking staging compatibility..."
 
           ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
-            bash -s -- "$ROOT" "$RUN_ID" <<'REMOTE'
+            "bash -s -- $REMOTE_ARGS" <<'REMOTE'
           set -euo pipefail
 
           ROOT="$1"
           RUN_ID="$2"
+          PHP_BIN="$3"
 
           case "$ROOT" in
             */applications/maevfyzheh/public_html) ;;
@@ -89,28 +110,49 @@ jobs:
           cd "$ROOT"
           test -f bin/magento
 
+          if [[ "$PHP_BIN" != /* || ! -f "$PHP_BIN" || ! -x "$PHP_BIN" ]]; then
+            echo "STAGING_PHP_BIN must point to an executable PHP CLI file." >&2
+            exit 1
+          fi
+
+          echo "Selected staging PHP version:"
+          "$PHP_BIN" -v
+
+          COMPOSER_BIN="$(command -v composer)" || {
+            echo "An existing Composer executable is required on the staging deploy user's PATH." >&2
+            exit 1
+          }
+
+          echo "Checking installed production dependencies..."
+          "$PHP_BIN" "$COMPOSER_BIN" --no-plugins --no-scripts check-platform-reqs --no-dev
+
+          echo "Checking Magento CLI bootstrap..."
+          "$PHP_BIN" bin/magento --version
+
+          echo "Creating deployment directory..."
           mkdir -p "var/cicd/releases/$RUN_ID" var/cicd/backups
           REMOTE
 
           echo "Uploading Training package..."
 
           ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
-            "cat > '$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz'" \
+            "cat > $REMOTE_PACKAGE" \
             < "$RUNNER_TEMP/training.tar.gz"
 
           echo "Verifying uploaded package..."
 
           ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
-            "test -s '$ROOT/var/cicd/releases/$RUN_ID/training.tar.gz' && echo 'Upload successful'"
+            "test -s $REMOTE_PACKAGE && echo 'Upload successful'"
 
           echo "Starting Magento deployment..."
 
           ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" \
-            bash -s -- "$ROOT" "$RUN_ID" <<'REMOTE'
+            "bash -s -- $REMOTE_ARGS" <<'REMOTE'
           set -Eeuo pipefail
 
           ROOT="$1"
           RUN_ID="$2"
+          PHP_BIN="$3"
 
           cd "$ROOT"
 
@@ -150,7 +192,7 @@ jobs:
               echo "New Training directory removed"
             fi
 
-            php bin/magento cache:clean || true
+            "$PHP_BIN" bin/magento cache:clean || true
 
             echo "WARNING: Database changes are not rolled back"
           }
@@ -166,14 +208,14 @@ jobs:
           mv "$RELEASE/Training" "$MODULE_DIR"
 
           echo "Running Magento setup:upgrade..."
-          php bin/magento setup:upgrade
+          "$PHP_BIN" bin/magento setup:upgrade
 
           echo "Running Magento deploy static content..."
-          php bin/magento s:s:d -f
-          php bin/magento s:s:d -f en_US
+          "$PHP_BIN" bin/magento s:s:d -f
+          "$PHP_BIN" bin/magento s:s:d -f en_US
   
           echo "Cleaning Magento cache..."
-          php bin/magento cache:clean
+          "$PHP_BIN" bin/magento cache:clean
 
           echo "Deployment successful!"
 
