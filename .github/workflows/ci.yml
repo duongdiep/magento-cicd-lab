@@ -28,10 +28,23 @@ jobs:
       - name: Check all PHP files
         shell: bash
         run: |
+          files="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/php-lint.XXXXXX")"
+          trap 'rm -f -- "$files"' EXIT
+
+          if ! find app/code tests -type f -name '*.php' -print0 > "$files"; then
+            echo "::error::PHP file discovery failed."
+            exit 1
+          fi
+
+          if [[ ! -s "$files" ]]; then
+            echo "::error::No PHP files were found to lint."
+            exit 1
+          fi
+
           failed=0
           while IFS= read -r -d '' file; do
             php -l "$file" || failed=1
-          done < <(find app/code tests -type f -name '*.php' -print0)
+          done < "$files"
           exit "$failed"
 
   phpcs:
